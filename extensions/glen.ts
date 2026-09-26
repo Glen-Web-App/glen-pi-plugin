@@ -1,15 +1,5 @@
-// packages/pi-plugin/extensions/glen.ts — the glen team-memory shim for pi.
-//
-// THIN-PLUGIN RULE (pi dialect): pi has no declarative hooks.json — this
-// extension IS the hook surface. The frozen command table below is the exact
-// analog of the other plugins' hook lines: one `glen <command> --agent pi`
-// invocation per lifecycle event, and NO business logic in this file — every
-// handler only serializes its event to the same JSON envelope the other
-// agents' hook runners provide, pipes it to the frozen command, and delivers
-// the command's output back to pi. The freeze-guard test
-// (packages/cli/src/commands/ingest.contract.test.ts) pins these command
-// lines; changing one requires updating that test and bumping this package's
-// version.
+// Frozen hook surface: no business logic in this file.
+// The command lines are pinned by packages/cli/src/commands/ingest.contract.test.ts.
 import { spawn } from "node:child_process";
 
 const GLEN_PI_HOOK_COMMANDS = {
@@ -19,9 +9,7 @@ const GLEN_PI_HOOK_COMMANDS = {
   postToolUse: "glen pr-link --agent pi",
 };
 
-// Structural slices of pi's ExtensionAPI/ExtensionContext — declared locally
-// (instead of importing @earendil-works/pi-coding-agent types) so the shim
-// typechecks standalone in the glen monorepo, which does not depend on pi.
+// Declared locally, not imported from pi, so this typechecks in the monorepo without a pi dependency.
 type PiEvent = Record<string, unknown>;
 type PiContext = {
   cwd: string;
@@ -38,14 +26,10 @@ type ExtensionAPI = {
   ) => void;
 };
 
-// Mirrors the other agents' hook runner timeout — a hung glen must never hold
-// a pi turn hostage.
 const HOOK_TIMEOUT_MS = 60_000;
 
-// Run one frozen glen command with the event JSON on stdin. Fail-open: any
-// spawn error, non-zero exit, or timeout resolves to "" — a glen outage must
-// never block or break a pi session (same invariant as every other agent's
-// glen hooks).
+// Fail open: any spawn error, non-zero exit, or timeout resolves to "".
+// A glen outage must never block or break a pi session.
 const runGlenHook = (command: string, payload: object): Promise<string> =>
   new Promise((resolve) => {
     try {
@@ -74,9 +58,6 @@ const runGlenHook = (command: string, payload: object): Promise<string> =>
     }
   });
 
-// glen's hook commands write the claude/codex hookSpecificOutput envelope
-// (additionalContext = model-facing context, systemMessage = user-facing
-// notice). Tolerate plain text so a future CLI change fails open.
 const parseHookOutput = (raw: string): { context: string; notice: string } => {
   const text = raw.trim();
   if (!text) return { context: "", notice: "" };
@@ -97,7 +78,6 @@ const parseHookOutput = (raw: string): { context: string; notice: string } => {
   }
 };
 
-// Flatten a pi message content value (string or content-block array) to text.
 const textOf = (content: unknown): string => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -116,16 +96,9 @@ const textOf = (content: unknown): string => {
 };
 
 export default function glenTeamMemory(pi: ExtensionAPI) {
-  // Context returned by earlier hooks that must reach the model on the NEXT
-  // turn (session-start context before the first prompt, Stop backstop hints
-  // after a turn). before_agent_start drains it into its injected message.
   let pendingContext: string[] = [];
-  // The current turn's user prompt (set by before_agent_start) and the prior
-  // turn's assistant answer — pi's analog of codex's last_assistant_message.
   let lastPrompt: string | null = null;
   let lastAssistant: string | null = null;
-  // Messages of the most recent low-level run; agent_settled (the real end of
-  // a turn — agent_end can fire per retry) sends them as the Stop capture.
   let lastRunMessages: unknown[] = [];
   let fallbackSessionId: string | null = null;
 
@@ -133,9 +106,7 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
     try {
       const id = ctx.sessionManager?.getSessionId?.();
       if (typeof id === "string" && id) return id;
-    } catch {
-      /* fall through to the memoized fallback */
-    }
+    } catch {}
     fallbackSessionId ??= `pi-${Date.now().toString(36)}-${Math.random()
       .toString(36)
       .slice(2, 10)}`;
@@ -146,23 +117,17 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
     try {
       const leaf = ctx.sessionManager?.getLeafId?.();
       if (typeof leaf === "string" && leaf) return leaf;
-    } catch {
-      /* fall through */
-    }
+    } catch {}
     return `t-${Date.now().toString(36)}`;
   };
 
   const notify = (ctx: PiContext, text: string): void => {
     try {
       ctx.ui?.notify?.(text, "info");
-    } catch {
-      /* notices are best-effort */
-    }
+    } catch {}
   };
 
-  // SessionStart — org/state line, setup nudges, the review-link instruction.
-  // Delivered with the first prompt's injection (pi has no pre-prompt context
-  // channel).
+  // Delivered with the first prompt's injection: pi has no pre-prompt context channel.
   pi.on("session_start", async (event, ctx) => {
     try {
       pendingContext = [];
@@ -178,13 +143,10 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
       const { context, notice } = parseHookOutput(out);
       if (notice) notify(ctx, notice);
       if (context) pendingContext.push(context);
-    } catch {
-      /* fail open */
-    }
+    } catch {}
     return undefined;
   });
 
-  // UserPromptSubmit — memory recall in, prompt capture out.
   pi.on("before_agent_start", async (event, ctx) => {
     try {
       const prompt = event.prompt;
@@ -212,24 +174,18 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
           display: false,
         },
       };
-    } catch {
-      /* fail open */
-    }
+    } catch {}
     return undefined;
   });
 
-  // agent_end fires per low-level run (retries included) — stash and wait for
-  // agent_settled, the true end of the turn.
+  // agent_end fires per low-level run (retries included); agent_settled is the real end of a turn.
   pi.on("agent_end", async (event) => {
     try {
       if (Array.isArray(event.messages)) lastRunMessages = event.messages;
-    } catch {
-      /* fail open */
-    }
+    } catch {}
     return undefined;
   });
 
-  // Stop — capture the completed turn (prompt + final assistant answer).
   pi.on("agent_settled", async (_event, ctx) => {
     try {
       const messages = lastRunMessages;
@@ -260,15 +216,10 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
       const { context, notice } = parseHookOutput(out);
       if (notice) notify(ctx, notice);
       if (context) pendingContext.push(context);
-    } catch {
-      /* fail open */
-    }
+    } catch {}
     return undefined;
   });
 
-  // PostToolUse (Bash) — surface the Glen review link when a shell command
-  // (e.g. `gh pr create`) printed a GitHub PR URL. Appending to the tool
-  // result is pi's same-turn analog of additionalContext.
   pi.on("tool_result", async (event, ctx) => {
     try {
       if (event.toolName !== "bash" || event.isError === true) return undefined;
@@ -292,9 +243,7 @@ export default function glenTeamMemory(pi: ExtensionAPI) {
           { type: "text", text: context },
         ],
       };
-    } catch {
-      /* fail open */
-    }
+    } catch {}
     return undefined;
   });
 }

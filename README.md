@@ -13,26 +13,27 @@ This package is a [pi](https://pi.dev) package: it ships the glen extension
 extension subscribes to pi's lifecycle events and runs one frozen `glen` CLI command
 per event (the same thin-hook model as glen's Claude Code and Codex plugins):
 
-- **`session_start`** → `glen session-start --agent pi` — announces the session,
-  surfaces org/incognito status, and queues the review-link instruction.
+- **`session_start`** → `glen session-start --agent pi` — surfaces org/mode status
+  and queues the review-link instruction.
 - **`before_agent_start`** → `glen ingest --agent pi` — sends the prompt (plus the
   prior assistant turn and workspace context: repo, branch, agent name) to your glen
   org, retrieves matching memories, and injects them as context for the model.
 - **`agent_settled`** → `glen ingest --agent pi` — captures the completed turn
   (your prompt + the final assistant answer) into team memory.
-- **`tool_result` (bash)** → `glen pr-link --agent pi` — when a shell command
-  surfaced a GitHub PR URL, appends the matching Glen review link so the agent can
-  share it.
+- **`tool_result` (bash)** → `glen pr-link --agent pi` — after a `git commit`, links
+  the commit to the session in glen; when a shell command surfaced a GitHub PR URL,
+  appends the matching Glen review link so the agent can share it.
 
 Every command is fail-open: a glen outage can never block or break a pi session.
-Nothing is recorded while incognito mode is on (`glen incognito on`). Glen never reads
-your filesystem directly — only what you send via prompts and assistant turns.
+`glen off` injects and records nothing. In incognito (`glen incognito`) recall still
+works but nothing is recorded to team memory. Glen reads only the hook input, the
+agent's session transcript, and git metadata for the current repo.
 
 ## Skills
 
 The package ships the full glen skill set (search, setup, controls, invite, forget,
 code-search, create-skill, use-skill, create-artifact, use-artifact,
-import-transcripts). Pi supports the Agent Skills standard, so they are available as
+import-transcripts, feedback, session-takeover). Pi supports the Agent Skills standard, so they are available as
 `/skill:<name>` and are offered to the agent automatically.
 
 ## Install
@@ -83,9 +84,10 @@ included) in one go.
 ## Uninstall
 
 ```bash
-pi remove git:github.com/Glen-Web-App/glen-pi-plugin
 glen uninstall
 ```
+
+This also runs `pi remove git:github.com/Glen-Web-App/glen-pi-plugin` for you.
 
 ## What data is sent
 
@@ -96,15 +98,17 @@ On every turn, glen sends to your glen org:
 - Workspace metadata: repo name, branch, commit hash, remote URL
 - Agent name (`pi`) and session details
 
-**Nothing is sent while incognito is on.** Recall still works — glen fetches relevant
-memories but writes nothing back. Toggle with `glen incognito on` / `glen incognito off`.
+**Nothing is recorded while incognito is on.** Recall still works — glen fetches
+relevant memories but writes nothing to team memory. Admin analytics still count your
+prompts as numbers only. Toggle with `glen incognito` / `glen on`. `glen off` injects
+and records nothing.
 
 Glen never sends data to any third party. All memory is stored in your org's private
 glen instance.
 
 ## Troubleshooting
 
-**Check session status (org, incognito):**
+**Check session status (org, mode):**
 
 ```sh
 glen status
