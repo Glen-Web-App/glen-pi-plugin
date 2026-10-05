@@ -1,5 +1,4 @@
-// Frozen hook surface: no business logic in this file.
-// The command lines are pinned by packages/cli/src/commands/ingest.contract.test.ts.
+// Frozen: no business logic here; the command lines are pinned by ingest.contract.test.ts.
 import { spawn } from "node:child_process";
 
 const GLEN_PI_HOOK_COMMANDS = {
@@ -28,8 +27,7 @@ type ExtensionAPI = {
 
 const HOOK_TIMEOUT_MS = 60_000;
 
-// Fail open: any spawn error, non-zero exit, or timeout resolves to "".
-// A glen outage must never block or break a pi session.
+// Fail open: a glen outage must never block or break a pi session.
 const runGlenHook = (command: string, payload: object): Promise<string> =>
   new Promise((resolve) => {
     try {
@@ -40,9 +38,7 @@ const runGlenHook = (command: string, payload: object): Promise<string> =>
       const chunks: Buffer[] = [];
       const timer = setTimeout(() => child.kill("SIGKILL"), HOOK_TIMEOUT_MS);
       child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-      child.stdin.on("error", () => {
-        /* EPIPE when glen is missing — the close/error handlers resolve */
-      });
+      child.stdin.on("error", () => {});
       child.on("error", () => {
         clearTimeout(timer);
         resolve("");
